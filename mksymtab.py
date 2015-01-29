@@ -2,7 +2,23 @@ import pycparser # the C parser written in Python
 import sys # so we can access command-line args
 import pprint # so we can pretty-print our output
 
-""" TODO RENAME SOME OF THESE CLASSES AND FACTOR OUT AND SUCH """
+class TagStack(object):
+    """
+        If a tag is pushed onto this, then the tag tests as being "in" this.
+        The push method returns a context manager so it can be used in a with statement.
+    """
+    def __init__(self):
+        self.tags = []
+    def push(self,the_tag):
+        actual_self = self
+        class ContextManager(object):
+            def __enter__(self):
+                actual_self.tags.append(the_tag)
+            def __exit__(self, type, value, traceback):
+                actual_self.tags.remove(the_tag)
+        return ContextManager()
+    def __contains__(self,the_tag):
+        return the_tag in self.tags
 
 class NestedDict(object):
     def __init__(self):
@@ -24,14 +40,14 @@ class NestedDict(object):
             current_node = current_node[elem]
         return current_node
     def insert(self,name,value):
-    	cn = self.current_node()
-    	if isinstance(cn,list):
-    		cn.append((name,value))
-    	elif isinstance(cn,dict):
-    		self[name] = value
-    	else:
-    		assert("should not get here!")
-    		
+        cn = self.current_node()
+        if isinstance(cn,list):
+            cn.append((name,value))
+        elif isinstance(cn,dict):
+            self[name] = value
+        else:
+            assert("should not get here!")
+            
     def __setitem__(self,name,value):
         """
             we override [] so that we can access/set whatever symbols are at the current scope
@@ -42,9 +58,9 @@ class NestedDict(object):
         current_node[name] = value
 
 def get_type_names(x):
-	return dict(x.children())["type"].names
+    return dict(x.children())["type"].names
 def get_type(x):
-	return dict(x.children())["type"]
+    return dict(x.children())["type"]
 
 class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
     """
@@ -53,12 +69,6 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
     """
     def __init__(self):
         """
-            We use two main instance variables, values and path.
-            Values is used to serve as a dict of the symbol names,
-                with the values either being the nodes that those symbols correspond to,
-                or a dict representing a subscope
-            the path is used to indicate the current scope that we're working with.
-            
             about_to_see_scope_name is used when we encounter something, like a function declaration,
             that indicates that the next declaration will be the name of a new scope
         """
@@ -68,8 +78,7 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
         
         self.types = NestedDict()
         
-        self.visiting_arguments = False
-        self.visiting_typedef = False
+        self.state = TagStack()
         
     def visit_Decl(self,node):
         """
@@ -78,24 +87,28 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
             Here we want to handle it accordingly in order to ensure that we either put it in the table,
                 or create a new scope with this being the name of that
         """
-        if self.visiting_typedef:
+        if "visiting_typedef" in self.state:
             what = self.types
         else:
             what = self.values
         if self.about_to_see_scope_name:
-            what[node.name] = {}
-            what.path.append(node.name)
             self.about_to_see_scope_name = False
-            what["..."] = []
-            what.path.append("...")
-            self.visiting_arguments = True
-            self.generic_visit(node)
-            d = dict(node.children()[0][1].children())
-            return_type = d["type"]
-            self.visiting_arguments = False
-            del what.path[-1]
-            what["return"] = get_type_names(return_type)
-        elif self.visiting_arguments:
+            if True:
+                what[node.name] = {}
+                what.path.append(node.name)
+                what["..."] = []
+                what.path.append("...")
+                with self.state.push("visiting_arguments"):
+                    self.generic_visit(node)
+                    d = dict(node.children()[0][1].children())
+                    return_type = d["type"]
+                del what.path[-1]
+                if isinstance(return_type,pycparser.c_ast.TypeDecl):
+                    what["return"] = get_type_names(return_type)
+                else:
+                    what["return"] = return_type.names
+                
+        elif "visiting_arguments" in self.state:
             the_type = get_type(node)
             what.current_node().append((node.name,get_type_names(the_type)))
         else:
@@ -111,7 +124,13 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
                 d = dict(the_type.children())
                 #dim = d["dim"]
                 the_type = d["type"]
-                what.insert(node.name,('',the_type))
+                
+                the_type = get_type(the_type)
+                if isinstance(the_type,pycparser.c_ast.Struct):
+                	the_type_name = "struct "+the_type.name
+                else:
+                	the_type_name = the_type.name
+                what.insert(node.name,('',the_type_name))
             else:
                 what.insert(node.name,the_type)
     def visit_FuncDef(self,node):
@@ -122,10 +141,11 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
         """
         self.about_to_see_scope_name = True
         self.generic_visit(node)
+        self.about_to_see_scope_name = False
         del self.values.path[-1]
         
     def visit_Struct(self,node):
-        if self.visiting_typedef:
+        if "visiting_typedef" in self.state:
             what = self.types
         else:
             what = self.values
@@ -138,14 +158,13 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
     def visit_Typedef(self,node):
         item_of_interest = get_type(get_type(node))
         if isinstance(item_of_interest,pycparser.c_ast.IdentifierType):
-			self.types[node.name] = item_of_interest.names
+            self.types[node.name] = item_of_interest.names
         else:
-			self.types[node.name] = {}
-			self.types.path.append(node.name)
-			self.visiting_typedef = True
-			self.generic_visit(node)
-			self.visiting_typedef = False
-			del self.types.path[-1]
+            self.types[node.name] = {}
+            self.types.path.append(node.name)
+            with self.state.push("visiting_typedef"):
+                self.generic_visit(node)
+            del self.types.path[-1]
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:    # optionally support passing in some code as a command-line argument
