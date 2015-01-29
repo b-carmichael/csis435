@@ -57,8 +57,13 @@ class NestedDict(object):
             current_node = current_node[elem]
         current_node[name] = value
 
+def only_elem_of_list(x):
+	if isinstance(x,list):
+		if len(x) == 1:
+			return x[0]
+	return x
 def get_type_names(x):
-    return dict(x.children())["type"].names
+    return only_elem_of_list(dict(x.children())["type"].names)
 def get_type(x):
     return dict(x.children())["type"]
 
@@ -106,7 +111,7 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
                 if isinstance(return_type,pycparser.c_ast.TypeDecl):
                     what["return"] = get_type_names(return_type)
                 else:
-                    what["return"] = return_type.names
+                    what["return"] = only_elem_of_list(return_type.names)
                 
         elif "visiting_arguments" in self.state:
             the_type = get_type(node)
@@ -158,13 +163,16 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
     def visit_Typedef(self,node):
         item_of_interest = get_type(get_type(node))
         if isinstance(item_of_interest,pycparser.c_ast.IdentifierType):
-            self.types[node.name] = item_of_interest.names
+            self.types[node.name] = only_elem_of_list(item_of_interest.names)
         else:
             self.types[node.name] = {}
             self.types.path.append(node.name)
             with self.state.push("visiting_typedef"):
                 self.generic_visit(node)
             del self.types.path[-1]
+            the_type = get_type(get_type(node))
+            if isinstance(the_type,pycparser.c_ast.Struct):
+            	self.types[node.name] = "struct "+the_type.name
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:    # optionally support passing in some code as a command-line argument
