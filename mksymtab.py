@@ -24,6 +24,8 @@ class NestedDict(object):
     def __init__(self):
         self.values = {}
         self.path = []
+    def __contains__(self,name):
+        return name in self.current_node()
     def __getitem__(self,name):
         """
             we override [] so that we can access whatever symbols are at the current scope
@@ -57,13 +59,15 @@ class NestedDict(object):
             current_node = current_node[elem]
         current_node[name] = value
 
-def only_elem_of_list(x):
-	if isinstance(x,list):
-		if len(x) == 1:
-			return x[0]
-	return x
+def normalize_type_name(x):
+    if isinstance(x,list):
+        if len(x) == 1:
+            return x[0]
+        else:
+        	return " ".join(x)
+    return x
 def get_type_names(x):
-    return only_elem_of_list(dict(x.children())["type"].names)
+    return normalize_type_name(dict(x.children())["type"].names)
 def get_type(x):
     return dict(x.children())["type"]
 
@@ -111,7 +115,7 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
                 if isinstance(return_type,pycparser.c_ast.TypeDecl):
                     what["return"] = get_type_names(return_type)
                 else:
-                    what["return"] = only_elem_of_list(return_type.names)
+                    what["return"] = normalize_type_name(return_type.names)
                 
         elif "visiting_arguments" in self.state:
             the_type = get_type(node)
@@ -132,9 +136,9 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
                 
                 the_type = get_type(the_type)
                 if isinstance(the_type,pycparser.c_ast.Struct):
-                	the_type_name = "struct "+the_type.name
+                    the_type_name = "struct "+the_type.name
                 else:
-                	the_type_name = the_type.name
+                    the_type_name = the_type.name
                 what.insert(node.name,('',the_type_name))
             else:
                 what.insert(node.name,the_type)
@@ -163,7 +167,7 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
     def visit_Typedef(self,node):
         item_of_interest = get_type(get_type(node))
         if isinstance(item_of_interest,pycparser.c_ast.IdentifierType):
-            self.types[node.name] = only_elem_of_list(item_of_interest.names)
+            self.types[node.name] = normalize_type_name(item_of_interest.names)
         else:
             self.types[node.name] = {}
             self.types.path.append(node.name)
@@ -172,7 +176,45 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
             del self.types.path[-1]
             the_type = get_type(get_type(node))
             if isinstance(the_type,pycparser.c_ast.Struct):
-            	self.types[node.name] = "struct "+the_type.name
+                self.types[node.name] = "struct "+the_type.name
+
+class SymbolTable(object):
+    def __init__(self,stb):
+        self.values = stb.values
+        self.types = stb.types
+    def sizeof(self,of_what):
+        if of_what == "int":
+            return 4
+        if of_what in ["char", "unsigned char", "signed char"]:
+            return 1
+        if of_what in ["short", "unsigned short", "signed short"]:
+            return 2
+        if of_what in ["long", "unsigned long", "signed long"]:
+            return 4
+        elif isinstance(of_what,list):
+            return sum([self.sizeof(item_type) for item_name, item_type in of_what])
+        elif isinstance(of_what,tuple):
+            dim, of_what = of_what
+            if dim == '':
+                return 4
+            else:
+                return int(dim) * self.sizeof(of_what)
+        elif of_what in self.types:
+            the_type = self.types[of_what]
+            return self.sizeof(the_type)
+        elif of_what in self.values:
+            the_type = self.values[of_what]
+            return self.sizeof(the_type)            
+        else:
+            print "name is "+str(of_what)
+            assert(False)
+    def offsets_of_elements(self,which_struct):
+        the_struct = self.types[which_struct]
+        offset = 0
+        for item_name, item_type in the_struct:
+            yield (item_name,offset)
+            offset = offset + self.sizeof(item_type)
+            
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:    # optionally support passing in some code as a command-line argument
@@ -199,7 +241,26 @@ int bar(int c, int d) {
 test() {};
 typedef int strange_unit;
 strange_unit bob;
-
+char a;
+unsigned char b;
+signed char c;
+short d;
+unsigned short e;
+signed short f;
+long g;
+unsigned long h;
+signed long i;
+typedef struct zoo {
+char a;
+unsigned char b;
+signed char c;
+short d;
+unsigned short e;
+signed short f;
+long g;
+unsigned long h;
+signed long i;
+} zoo;
 """
 
     cparser = pycparser.c_parser.CParser()
@@ -207,5 +268,19 @@ strange_unit bob;
     parsed_code.show()
     dv = SymbolTableBuilder()
     dv.visit(parsed_code)
-    pprint.pprint(dv.values.values)
-    pprint.pprint(dv.types.values)
+    st = SymbolTable(dv)
+    del dv
+    pprint.pprint(st.values.values)
+    pprint.pprint(st.types.values)
+    print st.sizeof("int")
+    print st.sizeof("strange_unit")
+    print st.sizeof("struct foobar")
+    print st.sizeof("z")
+    print st.sizeof("w")
+    print st.sizeof("q")
+    print st.sizeof("bob")
+    print list(st.offsets_of_elements("struct foobar"))
+    for name in ["a","b","c","d","e","f","g","h","i"]:
+        print st.sizeof(name)
+    print st.sizeof("zoo")
+        
