@@ -64,7 +64,7 @@ def normalize_type_name(x):
         if len(x) == 1:
             return x[0]
         else:
-        	return " ".join(x)
+            return " ".join(x)
     return x
 def get_type_names(x):
     return normalize_type_name(dict(x.children())["type"].names)
@@ -149,8 +149,10 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
             Here we want to have it signal that we're going to be starting a new scope with the next Decl
         """
         self.about_to_see_scope_name = True
+        body = dict(node.children())["body"]
         self.generic_visit(node)
         self.about_to_see_scope_name = False
+        self.values["{}"] = body
         del self.values.path[-1]
         
     def visit_Struct(self,node):
@@ -192,7 +194,14 @@ class SymbolTable(object):
         if of_what in ["long", "unsigned long", "signed long"]:
             return 4
         elif isinstance(of_what,list):
-            return sum([self.sizeof(item_type) for item_name, item_type in of_what])
+            the_struct = of_what
+            offset = 0
+            for item_name, item_type in the_struct:
+                the_size = self.sizeof(item_type)
+                padding = offset%the_size
+                offset = offset + padding
+                offset = offset + the_size
+            return offset
         elif isinstance(of_what,tuple):
             dim, of_what = of_what
             if dim == '':
@@ -212,8 +221,31 @@ class SymbolTable(object):
         the_struct = self.types[which_struct]
         offset = 0
         for item_name, item_type in the_struct:
+            the_size = self.sizeof(item_type)
+            padding = offset%the_size
+            offset = offset + padding
             yield (item_name,offset)
-            offset = offset + self.sizeof(item_type)
+            offset = offset + the_size
+    def functions(self):
+        for key, value in self.values.values.items():
+        	if isinstance(value,dict):
+        		yield (key,value)
+    def resolve(self,name):
+        if len(self.values.path) == 0:            
+            if name in self.values:
+                return "global"
+            return False
+        elif name in self.values:
+            return "local"
+        elif name in dict(self.values["..."]):
+            return "argument"
+        return False
+            
+
+def makeSymbolTable(parsed_code):
+    dv = SymbolTableBuilder()
+    dv.visit(parsed_code)
+    return SymbolTable(dv)
             
 
 if __name__ == "__main__":
@@ -282,5 +314,6 @@ signed long i;
     print list(st.offsets_of_elements("struct foobar"))
     for name in ["a","b","c","d","e","f","g","h","i"]:
         print st.sizeof(name)
+    print list(st.offsets_of_elements("struct zoo"))
     print st.sizeof("zoo")
         
