@@ -21,10 +21,10 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
         self.expression_stack = []
     def add(self,operation,destination,source1,source2,label=None):
         self.the_code.append((label,operation,destination,source1,source2))
-    def genLabel(self,scope="local",**kwargs):
+    def genLabel(self,label_type,scope):
         # do stuff here with symbol table
         the_label = "L"+str(label_generator.next())
-        self.the_symbol_table.values[the_label] = Label(**kwargs)
+        self.the_symbol_table.values[the_label] = label_type
         return the_label
     def start_visit(self,node):
         self.the_symbol_table.values.path.append(self.the_function_name)
@@ -33,6 +33,7 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
         assert(0 == len(self.the_symbol_table.values.path))
     def visit_Compound(self,node):
         self.generic_visit(node)
+        self.expression_stack.append("")
     def visit_Assignment(self,node):
         self.generic_visit(node)
         rvalue = self.expression_stack.pop()
@@ -50,13 +51,16 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
         self.generic_visit(node)
         operand1 = self.expression_stack.pop()
         operand2 = self.expression_stack.pop()
-        destination = self.genLabel("local")
+        assert(self.the_symbol_table.typeof(operand1) == self.the_symbol_table.typeof(operand2))
+        destination = self.genLabel(self.the_symbol_table.typeof(operand1),"local")
         self.add(node.op,destination,operand1,operand2)
         self.expression_stack.append(destination)
     def visit_UnaryOp(self,node):
         self.generic_visit(node)
         operand1 = self.expression_stack.pop()
-        destination = self.genLabel("local")
+        the_type = self.the_symbol_table.typeof(operand1)
+        # if the_type is & or * then handle differently
+        destination = self.genLabel(the_type,"local")
         if node.op == "p++":
             self.add("+",operand1,operand1,1)
             self.expression_stack.append(operand1)
@@ -67,8 +71,8 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
         init, cond, next, stmt = node.init, node.cond, node.next, node.stmt
         self.visit(init)
         junk = self.expression_stack.pop()        
-        top_of_loop = self.genLabel()
-        bottom_of_loop = self.genLabel()
+        top_of_loop = self.genLabel(Label(),"local")
+        bottom_of_loop = self.genLabel(Label(),"local")
         self.add("","","","",label=top_of_loop)
         self.visit(cond)
         conditional = self.expression_stack.pop()
@@ -79,6 +83,37 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
         junk = self.expression_stack.pop()
         self.add("unconditional_branch",top_of_loop,"","")
         self.add("","","","",label=bottom_of_loop)
+    def visit_While(self,node):
+        cond, stmt = node.cond, node.stmt        
+        top_of_loop = self.genLabel(Label(),"local")
+        bottom_of_loop = self.genLabel(Label(),"local")
+        self.add("","","","",label=top_of_loop)
+        self.visit(cond)
+        conditional = self.expression_stack.pop()
+        self.add("conditional_branch",bottom_of_loop,conditional,"")
+        self.visit(stmt)
+        junk = self.expression_stack.pop()        
+        self.add("unconditional_branch",top_of_loop,"","")
+        self.add("","","","",label=bottom_of_loop)
+    def visit_If(self,node):
+        cond, iffalse, iftrue = node.cond, node.iffalse, node.iftrue        
+        then_part = self.genLabel(Label(),"local")
+        else_part = self.genLabel(Label(),"local")
+        end_part = self.genLabel(Label(),"local")
+        self.visit(cond)
+        conditional = self.expression_stack.pop()
+        self.add("conditional_branch",then_part,conditional,"")
+        self.add("unconditional_branch",else_part,"","")
+        self.add("","","","",label=then_part)        
+        self.visit(iftrue)
+        junk = self.expression_stack.pop()        
+        self.add("unconditional_branch",end_part,"","")
+        self.add("","","","",label=else_part)                
+        if iffalse is not None:
+            self.visit(iffalse)
+            junk = self.expression_stack.pop()        
+        self.add("","","","",label=end_part)
+    
         
         
 
@@ -88,15 +123,28 @@ if __name__ == "__main__":
     else: # this can not handle the typedef and struct below correctly. Need to work on it.
         code_to_parse = """
 int foo(int a, int b) {
-    int x;
-    int y;
-    return (x+y);
+	if (a == b) {
+		return 1;
+	} else {
+		return 0;
+	};
 };
 int bar(int c, int d) {
-    int y;
-    int z;
+	if (c == d) {
+		return 1;
+	};
+	return 0;
 };
-test() {};
+typedef struct linked_list {
+	int item;
+	struct linked_list * next;
+} linked_list;
+int * test(linked_list * node) {
+	while (node->next) {
+		node = (*node).next;
+	};
+	return &(node->item);
+};
 int sum_of_squares(int x) {
 	int i;
 	int result;
@@ -124,4 +172,5 @@ int sum_of_squares(int x) {
     	pprint.pprint(cb.the_code)
     	#pprint.pprint(st.values.values)
     	#pprint.pprint(st.types.values)
+    pprint.pprint(st.values.values)
     
