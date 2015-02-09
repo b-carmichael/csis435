@@ -67,6 +67,11 @@ def normalize_type_name(x):
             return " ".join(x)
     return x
 def get_type_names(x):
+    the_type = dict(x.children())["type"]
+    if isinstance(the_type,pycparser.c_ast.TypeDecl):
+        return normalize_type_name(the_type.declname)
+    #pprint.pprint()
+    #pprint.pprint(dir(dict(x.children())["type"]))
     return normalize_type_name(dict(x.children())["type"].names)
 def get_type(x):
     return dict(x.children())["type"]
@@ -114,6 +119,8 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
                 del what.path[-1]
                 if isinstance(return_type,pycparser.c_ast.TypeDecl):
                     what["return"] = get_type_names(return_type)
+                elif isinstance(return_type,pycparser.c_ast.PtrDecl):
+                    what["return"] = ('',get_type(dict(return_type.children())["type"]))
                 else:
                     what["return"] = normalize_type_name(return_type.names)
                 
@@ -180,10 +187,27 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
             if isinstance(the_type,pycparser.c_ast.Struct):
                 self.types[node.name] = "struct "+the_type.name
 
+class Identifier(object):
+    def __init__(self,name):
+        self.name = name
+
 class SymbolTable(object):
     def __init__(self,stb):
         self.values = stb.values
         self.types = stb.types
+    def typeof(self,of_what):
+        if of_what in ["int", "char", "unsigned char", "signed char", "short", "unsigned short", "signed short", "long", "unsigned long", "signed long"]:
+            return of_what
+        elif of_what in self.types:
+            return self.types[of_what]
+        elif of_what in self.values:
+            return self.values[of_what]
+        elif of_what in dict(self.values["..."]):
+            args_dict = dict(self.values["..."])
+            return args_dict[of_what]
+        else:
+            assert(isinstance(of_what,str))
+            return Identifier(of_what)
     def sizeof(self,of_what):
         if of_what == "int":
             return 4
