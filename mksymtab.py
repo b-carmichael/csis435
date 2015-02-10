@@ -70,9 +70,8 @@ def get_type_names(x):
     the_type = dict(x.children())["type"]
     if isinstance(the_type,pycparser.c_ast.TypeDecl):
         return normalize_type_name(the_type.declname)
-    #pprint.pprint()
-    #pprint.pprint(dir(dict(x.children())["type"]))
-    return normalize_type_name(dict(x.children())["type"].names)
+    result = normalize_type_name(dict(x.children())["type"].names)
+    return result
 def get_type(x):
     return dict(x.children())["type"]
 
@@ -120,13 +119,22 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
                 if isinstance(return_type,pycparser.c_ast.TypeDecl):
                     what["return"] = get_type_names(return_type)
                 elif isinstance(return_type,pycparser.c_ast.PtrDecl):
-                    what["return"] = ('',get_type(dict(return_type.children())["type"]))
+                    ptr_to_what = get_type(dict(return_type.children())["type"])
+                    if isinstance(ptr_to_what,pycparser.c_ast.IdentifierType):
+                        ptr_to_what = normalize_type_name(ptr_to_what.names)
+                    what["return"] = ('',
+                        ptr_to_what
+                    	)
                 else:
                     what["return"] = normalize_type_name(return_type.names)
                 
         elif "visiting_arguments" in self.state:
             the_type = get_type(node)
-            what.current_node().append((node.name,get_type_names(the_type)))
+            if isinstance(the_type,pycparser.c_ast.PtrDecl):
+                the_type = ('',normalize_type_name(dict(dict(the_type.children())["type"].children())["type"].names))
+            else:
+                the_type = get_type_names(the_type)
+            what.current_node().append((node.name,the_type))
         else:
             the_type = get_type(node)
             if isinstance(the_type,pycparser.c_ast.TypeDecl):
