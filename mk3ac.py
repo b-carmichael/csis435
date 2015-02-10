@@ -11,7 +11,7 @@ label_generator = itertools.count()
 class Label(object):
     def __init__(self,**kwargs):
         self.kwargs = kwargs
-	pass
+    pass
 
 class CodeBuilder(pycparser.c_ast.NodeVisitor):
     def __init__(self,function_name,symbol_table):
@@ -41,7 +41,10 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
         self.add("=",lvalue,rvalue,"")
         self.expression_stack.append(lvalue)
     def visit_ID(self,node):
+        pprint.pprint(self.expression_stack)
         self.expression_stack.append(node.name)
+        pprint.pprint(self.expression_stack)
+        assert(False)
     def visit_Constant(self,node):
         self.expression_stack.append(node.value)
     def visit_Return(self,node):
@@ -60,6 +63,12 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
         operand1 = self.expression_stack.pop()
         the_type = self.the_symbol_table.typeof(operand1)
         # if the_type is & or * then handle differently
+        if node.op == "*":
+            assert(isinstance(the_type,tuple))
+            dim, ptr_type = the_type
+            the_type = ptr_type
+        elif node.op == "&":
+            the_type = ('',the_type)
         destination = self.genLabel(the_type,"local")
         if node.op == "p++":
             self.add("+",operand1,operand1,1)
@@ -67,6 +76,35 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
         else:
             self.add(node.op,destination,operand1,"")
             self.expression_stack.append(destination)
+    def visit_StructRef(self,node):
+        StructRef_type = node.type
+        pprint.pprint(node.children())
+        pprint.pprint(dict(node.children())["name"])
+        pprint.pprint(self.expression_stack)
+        print "calling generic visit"
+        self.visit(dict(node.children())["name"])
+        print "called generic visit"
+        pprint.pprint(self.expression_stack)
+        if StructRef_type == "->":
+            operand1 = self.expression_stack.pop()
+            the_type = self.the_symbol_table.typeof(operand1)
+            assert(isinstance(the_type,tuple))
+            dim, ptr_type = the_type
+            the_type = ptr_type
+            destination = self.genLabel(the_type,"local")
+            self.add("*",destination,operand1,"")    
+            self.expression_stack.append(destination)
+        assert(False)
+        if StructRef_type in [".","->"]:
+            the_struct = self.expression_stack.pop()
+            self.visit(dict(node.children())["field"])
+            the_field = self.expression_stack.pop()
+            pprint.pprint(the_field)
+            assert(False)
+            dict(self.the_symbol_table.offsets_of_elements(the_struct))[the_field]
+        else: assert(False)
+        pprint.pprint({key: value.name for key, value in node.children()})
+        assert(False)
     def visit_For(self,node):
         init, cond, next, stmt = node.init, node.cond, node.next, node.stmt
         self.visit(init)
@@ -123,36 +161,36 @@ if __name__ == "__main__":
     else: # this can not handle the typedef and struct below correctly. Need to work on it.
         code_to_parse = """
 int foo(int a, int b) {
-	if (a == b) {
-		return 1;
-	} else {
-		return 0;
-	};
+    if (a == b) {
+        return 1;
+    } else {
+        return 0;
+    };
 };
 int bar(int c, int d) {
-	if (c == d) {
-		return 1;
-	};
-	return 0;
+    if (c == d) {
+        return 1;
+    };
+    return 0;
 };
 typedef struct linked_list {
-	int item;
-	struct linked_list * next;
+    int item;
+    struct linked_list * next;
 } linked_list;
 int * test(linked_list * node) {
-	while (node->next) {
-		node = (*node).next;
-	};
-	return &(node->item);
+    while (node->next) {
+        node = (*node).next;
+    };
+    return &(node->item);
 };
 int sum_of_squares(int x) {
-	int i;
-	int result;
-	result = 0;
-	for (i = 1; i <= x; i++) {
-		result = result + i*i;
-	};
-	return result;
+    int i;
+    int result;
+    result = 0;
+    for (i = 1; i <= x; i++) {
+        result = result + i*i;
+    };
+    return result;
 };
 """
     cparser = pycparser.c_parser.CParser()
@@ -164,13 +202,11 @@ int sum_of_squares(int x) {
     functions = (dict(st.functions()))
     #pprint.pprint(st.values.path)
     for key,value in functions.items():
-    	print key
-    	body = value["{}"]
-    	body.show()
-    	cb = CodeBuilder(key,st)
-    	cb.start_visit(body)
-    	pprint.pprint(cb.the_code)
-    	#pprint.pprint(st.values.values)
-    	#pprint.pprint(st.types.values)
+        print key
+        body = value["{}"]
+        body.show()
+        cb = CodeBuilder(key,st)
+        cb.start_visit(body)
+        value["{}"] = cb.the_code
     pprint.pprint(st.values.values)
     
