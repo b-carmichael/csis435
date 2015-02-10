@@ -250,7 +250,9 @@ class SymbolTable(object):
             print "name is "+str(of_what)
             assert(False)
     def offsets_of_elements(self,which_struct):
-        the_struct = self.types[which_struct]
+        while isinstance(which_struct,str):
+            which_struct = self.types[which_struct]
+        the_struct = which_struct
         offset = 0
         for item_name, item_type in the_struct:
             the_size = self.sizeof(item_type)
