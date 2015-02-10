@@ -41,10 +41,7 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
         self.add("=",lvalue,rvalue,"")
         self.expression_stack.append(lvalue)
     def visit_ID(self,node):
-        pprint.pprint(self.expression_stack)
         self.expression_stack.append(node.name)
-        pprint.pprint(self.expression_stack)
-        assert(False)
     def visit_Constant(self,node):
         self.expression_stack.append(node.value)
     def visit_Return(self,node):
@@ -78,13 +75,7 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
             self.expression_stack.append(destination)
     def visit_StructRef(self,node):
         StructRef_type = node.type
-        pprint.pprint(node.children())
-        pprint.pprint(dict(node.children())["name"])
-        pprint.pprint(self.expression_stack)
-        print "calling generic visit"
         self.visit(dict(node.children())["name"])
-        print "called generic visit"
-        pprint.pprint(self.expression_stack)
         if StructRef_type == "->":
             operand1 = self.expression_stack.pop()
             the_type = self.the_symbol_table.typeof(operand1)
@@ -94,17 +85,17 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
             destination = self.genLabel(the_type,"local")
             self.add("*",destination,operand1,"")    
             self.expression_stack.append(destination)
-        assert(False)
         if StructRef_type in [".","->"]:
             the_struct = self.expression_stack.pop()
             self.visit(dict(node.children())["field"])
             the_field = self.expression_stack.pop()
-            pprint.pprint(the_field)
+            the_struct_type = self.the_symbol_table.typeof(the_struct)
+            offset = dict(self.the_symbol_table.offsets_of_elements(the_struct_type))[the_field]
+            pprint.pprint(offset)
+            #destination = self.genLabel(the_type,"local")
+            #self.add("load",
             assert(False)
-            dict(self.the_symbol_table.offsets_of_elements(the_struct))[the_field]
         else: assert(False)
-        pprint.pprint({key: value.name for key, value in node.children()})
-        assert(False)
     def visit_For(self,node):
         init, cond, next, stmt = node.init, node.cond, node.next, node.stmt
         self.visit(init)
