@@ -4,6 +4,8 @@ import pprint # so we can pretty-print our output
 
 import mksymtab
 
+from compiler_utilities import TagStack
+
 import itertools
 
 label_generator = itertools.count()
@@ -19,6 +21,7 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
         self.the_symbol_table = symbol_table
         self.the_function_name = function_name
         self.expression_stack = []
+        self.state = TagStack()
     def add(self,operation,destination,source1,source2,label=None):
         self.the_code.append((label,operation,destination,source1,source2))
     def genLabel(self,label_type,scope):
@@ -35,7 +38,11 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
         self.generic_visit(node)
         self.expression_stack.append("")
     def visit_Assignment(self,node):
-        self.generic_visit(node)
+        children = dict(node.children())
+        lvalue, rvalue = children["lvalue"], children["rvalue"]
+        with self.state.push("lvalue"):
+            self.visit(lvalue)
+        self.visit(rvalue)
         rvalue = self.expression_stack.pop()
         lvalue = self.expression_stack.pop()
         self.add("=",lvalue,rvalue,"")
@@ -56,7 +63,13 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
         self.add(node.op,destination,operand1,operand2)
         self.expression_stack.append(destination)
     def visit_UnaryOp(self,node):
-        self.generic_visit(node)
+        if node.op == "&":
+            with self.state.push("lvalue"):
+                self.generic_visit(node)
+            return
+        else:
+            with self.state.unpush("lvalue"):
+                self.generic_visit(node)
         operand1 = self.expression_stack.pop()
         the_type = self.the_symbol_table.typeof(operand1)
         # if the_type is & or * then handle differently
@@ -71,7 +84,16 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
             self.add("+",operand1,operand1,1)
             self.expression_stack.append(operand1)
         else:
-            self.add(node.op,destination,operand1,"")
+            if "lvalue" in self.state and node.op == "*":
+                pass
+            else:
+                self.add(node.op,destination,operand1,"")
+        if "lvalue" in self.state:
+            if node.op == "*":
+                self.expression_stack.append(operand1)
+            else:
+                self.expression_stack.append(destination)
+        else:
             self.expression_stack.append(destination)
     def visit_StructRef(self,node):
         StructRef_type = node.type
@@ -90,11 +112,17 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
             self.visit(dict(node.children())["field"])
             the_field = self.expression_stack.pop()
             the_struct_type = self.the_symbol_table.typeof(the_struct)
-            offset = dict(self.the_symbol_table.offsets_of_elements(the_struct_type))[the_field]
+            offset, the_element_type = dict(self.the_symbol_table.offsets_and_types_of_elements(the_struct_type))[the_field]
             pprint.pprint(offset)
-            #destination = self.genLabel(the_type,"local")
-            #self.add("load",
-            assert(False)
+            pprint.pprint(the_element_type)
+            destination = self.genLabel(the_element_type,"local")
+            if "lvalue" in self.state:
+                self.add("+",destination,the_struct,offset)
+                self.expression_stack.append(destination)
+            else:
+                self.add("load",destination,the_struct,offset)
+                self.expression_stack.append(destination)
+            #assert(False)
         else: assert(False)
     def visit_For(self,node):
         init, cond, next, stmt = node.init, node.cond, node.next, node.stmt
