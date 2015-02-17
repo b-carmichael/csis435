@@ -98,6 +98,8 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
     def visit_StructRef(self,node):
         StructRef_type = node.type
         self.visit(dict(node.children())["name"])
+        # we can't really deref a struct,
+        # we want to defer the deref if we're in an lvalue context
         if StructRef_type == "->":
             operand1 = self.expression_stack.pop()
             the_type = self.the_symbol_table.typeof(operand1)
@@ -105,16 +107,23 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
             dim, ptr_type = the_type
             the_type = ptr_type
             destination = self.genLabel(the_type,"local")
-            self.add("*",destination,operand1,"")    
-            self.expression_stack.append(destination)
+            if "lvalue" in self.state:
+                self.expression_stack.append(operand1)
+            else:
+                self.add("*",destination,operand1,"")    
+                self.expression_stack.append(destination)
         if StructRef_type in [".","->"]:
             the_struct = self.expression_stack.pop()
             self.visit(dict(node.children())["field"])
             the_field = self.expression_stack.pop()
+            pprint.pprint(the_field)
+            assert(the_field in ["next","item"])
             the_struct_type = self.the_symbol_table.typeof(the_struct)
+            if isinstance(the_struct_type,tuple):
+            	dim, the_struct_type = the_struct_type
+            if the_field == "item":
+                pprint.pprint(the_struct_type)
             offset, the_element_type = dict(self.the_symbol_table.offsets_and_types_of_elements(the_struct_type))[the_field]
-            pprint.pprint(offset)
-            pprint.pprint(the_element_type)
             destination = self.genLabel(the_element_type,"local")
             if "lvalue" in self.state:
                 self.add("+",destination,the_struct,offset)
