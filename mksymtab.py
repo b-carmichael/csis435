@@ -2,23 +2,7 @@ import pycparser # the C parser written in Python
 import sys # so we can access command-line args
 import pprint # so we can pretty-print our output
 
-class TagStack(object):
-    """
-        If a tag is pushed onto this, then the tag tests as being "in" this.
-        The push method returns a context manager so it can be used in a with statement.
-    """
-    def __init__(self):
-        self.tags = []
-    def push(self,the_tag):
-        actual_self = self
-        class ContextManager(object):
-            def __enter__(self):
-                actual_self.tags.append(the_tag)
-            def __exit__(self, type, value, traceback):
-                actual_self.tags.remove(the_tag)
-        return ContextManager()
-    def __contains__(self,the_tag):
-        return the_tag in self.tags
+from compiler_utilities import TagStack
 
 class NestedDict(object):
     def __init__(self):
@@ -153,7 +137,10 @@ class SymbolTableBuilder(pycparser.c_ast.NodeVisitor):
                 if isinstance(the_type,pycparser.c_ast.Struct):
                     the_type_name = "struct "+the_type.name
                 else:
-                    the_type_name = the_type.name
+                    if isinstance(the_type,pycparser.c_ast.IdentifierType):
+                        the_type_name = normalize_type_name(the_type.names)
+                    else:
+                        the_type_name = the_type.name
                 what.insert(node.name,('',the_type_name))
             else:
                 what.insert(node.name,the_type)
@@ -249,7 +236,7 @@ class SymbolTable(object):
         else:
             print "name is "+str(of_what)
             assert(False)
-    def offsets_of_elements(self,which_struct):
+    def offsets_and_types_of_elements(self,which_struct):
         while isinstance(which_struct,str):
             which_struct = self.types[which_struct]
         the_struct = which_struct
@@ -258,7 +245,7 @@ class SymbolTable(object):
             the_size = self.sizeof(item_type)
             padding = offset%the_size
             offset = offset + padding
-            yield (item_name,offset)
+            yield (item_name,(offset,item_type))
             offset = offset + the_size
     def functions(self):
         for key, value in self.values.values.items():
@@ -345,9 +332,9 @@ signed long i;
     print st.sizeof("w")
     print st.sizeof("q")
     print st.sizeof("bob")
-    print list(st.offsets_of_elements("struct foobar"))
+    print list(st.offsets_and_types_of_elements("struct foobar"))
     for name in ["a","b","c","d","e","f","g","h","i"]:
         print st.sizeof(name)
-    print list(st.offsets_of_elements("struct zoo"))
+    print list(st.offsets_and_types_of_elements("struct zoo"))
     print st.sizeof("zoo")
         
