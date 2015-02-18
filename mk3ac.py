@@ -54,10 +54,23 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
     def visit_Return(self,node):
         self.generic_visit(node)
         self.add("return",self.expression_stack.pop(),"","")
+    def visit_FuncCall(self,node):
+        self.generic_visit(node)
+        pprint.pprint(node.name.name)
+        pprint.pprint(node.args.children()[0][1].name)
+        # WORK HERE MORE LATER
+        function_name = node.name.name
+        function_return_type = dict(self.the_symbol_table.functions())[function_name]["return"]
+        destination = self.genLabel(function_return_type,"local")
+        self.add("call",destination,node.name.name,node.args.children()[0][1].name)
+        self.expression_stack.append(destination)
     def visit_BinaryOp(self,node):
         self.generic_visit(node)
         operand1 = self.expression_stack.pop()
         operand2 = self.expression_stack.pop()
+        pprint.pprint(self.the_symbol_table.values.values)
+        print(operand1,operand2)
+        print(self.the_symbol_table.typeof(operand1),self.the_symbol_table.typeof(operand2))
         assert(self.the_symbol_table.typeof(operand1) == self.the_symbol_table.typeof(operand2))
         destination = self.genLabel(self.the_symbol_table.typeof(operand1),"local")
         self.add(node.op,destination,operand1,operand2)
@@ -180,8 +193,15 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
             junk = self.expression_stack.pop()        
         self.add("","","","",label=end_part)
     
-        
-        
+def make3ac(st):        
+    functions = (dict(st.functions()))
+    for key,value in functions.items():
+        if key == "putint":
+            continue
+        body = value["{}"]
+        cb = CodeBuilder(key,st)
+        cb.start_visit(body)
+        value["{}"] = cb.the_code        
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:    # optionally support passing in some code as a command-line argument
@@ -230,6 +250,8 @@ int sum_of_squares(int x) {
     functions = (dict(st.functions()))
     #pprint.pprint(st.values.path)
     for key,value in functions.items():
+        if key == "putint":
+            continue
         print key
         body = value["{}"]
         body.show()
