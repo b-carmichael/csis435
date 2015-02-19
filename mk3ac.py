@@ -56,8 +56,6 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
         self.add("return",self.expression_stack.pop(),"","")
     def visit_FuncCall(self,node):
         self.generic_visit(node)
-        pprint.pprint(node.name.name)
-        pprint.pprint(node.args.children()[0][1].name)
         # WORK HERE MORE LATER
         function_name = node.name.name
         function_return_type = dict(self.the_symbol_table.functions())[function_name]["return"]
@@ -68,9 +66,6 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
         self.generic_visit(node)
         operand1 = self.expression_stack.pop()
         operand2 = self.expression_stack.pop()
-        pprint.pprint(self.the_symbol_table.values.values)
-        print(operand1,operand2)
-        print(self.the_symbol_table.typeof(operand1),self.the_symbol_table.typeof(operand2))
         assert(self.the_symbol_table.typeof(operand1) == self.the_symbol_table.typeof(operand2))
         destination = self.genLabel(self.the_symbol_table.typeof(operand1),"local")
         self.add(node.op,destination,operand1,operand2)
@@ -129,13 +124,13 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
             the_struct = self.expression_stack.pop()
             self.visit(dict(node.children())["field"])
             the_field = self.expression_stack.pop()
-            pprint.pprint(the_field)
             assert(the_field in ["next","item"])
             the_struct_type = self.the_symbol_table.typeof(the_struct)
             if isinstance(the_struct_type,tuple):
             	dim, the_struct_type = the_struct_type
             if the_field == "item":
-                pprint.pprint(the_struct_type)
+                #pprint.pprint(the_struct_type)
+                pass
             offset, the_element_type = dict(self.the_symbol_table.offsets_and_types_of_elements(the_struct_type))[the_field]
             destination = self.genLabel(the_element_type,"local")
             if "lvalue" in self.state:
