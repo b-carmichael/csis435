@@ -5,9 +5,90 @@ import pycparser
 import mksymtab
 import mk3ac
 
-def process_3ac(the_3ac):
+def assign_registers(the_3ac,funct_info):
+	names_of_locals = funct_info.offsets_of_locals.keys()
+	result = {}
+	counter = 0
+	for name in names_of_locals:
+		if name == "L5":
+			result[name] = "$t0"
+		else:
+			result[name] = "$s"+str(counter)
+			counter = counter + 1
+	#for label, operation, destination, operand1, operand2 in the_3ac:
+	return result
+
+op_to_asm = {
+	"*":	("mult",3),
+	"unconditional_branch":	("j",1)
+	}
+
+def process_3ac(the_3ac,funct_info):
+	register_assignments = assign_registers(the_3ac,funct_info)
+	def handle_possible_immediate(operand):
+		"return (immediate?,text)"
+		try:
+			if str(int(operand)) == str(operand):
+				return (True,str(operand))
+			else:
+				assert(False)
+		except ValueError:
+			return (False,register_assignments[operand])
+		
 	result = ""
-	print (the_3ac)
+	for label, operation, destination, operand1, operand2 in the_3ac:
+		if label is None:
+			pass
+		else:
+			result += "\n"
+			result += str(label)
+			result += ":"
+		if operation == "":
+			pass
+		else:
+			result += "\t"
+			if operation in ["conditional_branch","call","return"]:
+				result += str(operation)+" "+str(destination)+" "+str(operand1)+" "+str(operand2)+"""
+"""
+			elif operation in ["="]:
+				is_immediate, s = handle_possible_immediate(operand1)
+				if is_immediate:
+					result += "li	"+register_assignments[destination]+", "+str(operand1)+"""
+"""
+				else:
+					result += "move	"+register_assignments[destination]+", "+register_assignments[operand1]+"""
+"""
+			elif operation in ["<="]:
+				result += "slt	"+register_assignments[destination]+", "+register_assignments[operand2]+", 				"+register_assignments[operand1]+"""
+	"""
+				result += "not	"+register_assignments[destination]+", "+register_assignments[destination]+"""
+	"""
+			elif operation in ["+"]:
+				is_immediate, s = handle_possible_immediate(operand1)
+				if is_immediate:
+					result += "addi	"+register_assignments[destination]+", "+register_assignments[operand2]+", "+operand1+"""
+"""
+				else:
+					is_immediate, s = handle_possible_immediate(operand2)
+					if is_immediate:
+						
+						result += "addi	"+register_assignments[destination]+", "+register_assignments[operand1]+", "+str(operand2)+"""
+	"""
+					else:
+						result += "add	"+register_assignments[destination]+", "+register_assignments[operand1]+", 				"+register_assignments[operand2]+"""
+	"""
+			else:
+				asm, num_args = op_to_asm[operation]
+				labels = [key for key, value in funct_info.the_symbol_table.values[funct_info.name].items() if isinstance(value,mk3ac.Label)]
+				def keep_if_label(x):
+					if (x in labels):
+						return x
+					else:
+						return register_assignments[x]
+				result += asm+" "+", ".join([keep_if_label(item) for item in [destination,operand1,operand2][:num_args]])+"""
+"""
+
+	return (result)
 
 # WORK HERE
 class FunctionInformation(object):
@@ -15,7 +96,7 @@ class FunctionInformation(object):
         self.the_symbol_table = st
         
 	
-def space_needed_on_stack_and_offsets(st,func_name):
+def makeFunctionInformation(st,func_name):
     result = FunctionInformation(st)
     some_function = st.values[func_name]
     result.name = func_name
@@ -28,7 +109,9 @@ def space_needed_on_stack_and_offsets(st,func_name):
         elif isinstance(value,mk3ac.Label):
             pass
         elif key == "{}":
-            result.body = process_3ac(value)
+            #result.body = process_3ac(value)
+            result.body = value
+            pass
         else:
             struct_like_type.append((key,value))
     struct_like_type.append(("","int"))
@@ -72,12 +155,13 @@ int main()
         if key == "putint":
             continue
         print key
-        result = space_needed_on_stack_and_offsets(st,key)
+        result = makeFunctionInformation(st,key)
         pprint.pprint(result.args)
         print result.size_of_locals
         pprint.pprint(result.offsets_of_locals)
         pprint.pprint(result.return_type)
-        pprint.pprint(result.body)
+        print result.body
+        print process_3ac(result.body,result)
         
     
 
