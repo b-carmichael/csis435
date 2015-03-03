@@ -60,7 +60,10 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
         function_name = node.name.name
         function_return_type = dict(self.the_symbol_table.functions())[function_name]["return"]
         destination = self.genLabel(function_return_type,"local")
-        self.add("call",destination,node.name.name,node.args.children()[0][1].name)
+        if node.args is None:
+            self.add("call",destination,node.name.name,"")
+        else:
+            self.add("call",destination,node.name.name,node.args.children()[0][1].name)
         self.expression_stack.append(destination)
     def visit_BinaryOp(self,node):
         self.generic_visit(node)
@@ -191,7 +194,7 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
 def make3ac(st):        
     functions = (dict(st.functions()))
     for key,value in functions.items():
-        if key == "putint":
+        if key in ["putint","exit"]:
             continue
         body = value["{}"]
         cb = CodeBuilder(key,st)
@@ -245,7 +248,7 @@ int sum_of_squares(int x) {
     functions = (dict(st.functions()))
     #pprint.pprint(st.values.path)
     for key,value in functions.items():
-        if key == "putint":
+        if key in ["putint","exit"]:
             continue
         print key
         body = value["{}"]
