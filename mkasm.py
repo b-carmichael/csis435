@@ -19,7 +19,6 @@ def assign_registers(the_3ac,funct_info):
 	return result
 
 op_to_asm = {
-	"*":	("mult",3),
 	"unconditional_branch":	("j",1)
 	}
 
@@ -46,37 +45,88 @@ def process_3ac(the_3ac,funct_info):
 		if operation == "":
 			pass
 		else:
-			result += "\t"
-			if operation in ["conditional_branch","call","return"]:
-				result += str(operation)+" "+str(destination)+" "+str(operand1)+" "+str(operand2)+"""
+			if operation in ["call"]:
+				if operand2 != '':
+				    result += "\tmove\t$a0, "+register_assignments[operand2]+"""
 """
+				result += "\tjal\t"+str(operand1)+"""
+"""
+				result += "\tmove\t"+register_assignments[destination]+", $v0"+"""
+"""
+			elif operation in ["return"]:
+				is_immediate, s = handle_possible_immediate(destination)
+				if is_immediate:
+					result += "\tli\t$t1, "+s+"""
+"""
+					destination = "$t1"
+				else:
+					result += "\tmove\t$t1, "+register_assignments[destination]+"""
+"""	
+				result += """\tmove\t$v0, $t1
+"""
+				result += """\tjr $ra
+"""			
 			elif operation in ["="]:
 				is_immediate, s = handle_possible_immediate(operand1)
 				if is_immediate:
-					result += "li	"+register_assignments[destination]+", "+str(operand1)+"""
+					result += "\tli	"+register_assignments[destination]+", "+str(operand1)+"""
 """
 				else:
-					result += "move	"+register_assignments[destination]+", "+register_assignments[operand1]+"""
+					result += "\tmove	"+register_assignments[destination]+", "+register_assignments[operand1]+"""
 """
 			elif operation in ["<="]:
-				result += "slt	"+register_assignments[destination]+", "+register_assignments[operand2]+", 				"+register_assignments[operand1]+"""
-	"""
-				result += "not	"+register_assignments[destination]+", "+register_assignments[destination]+"""
-	"""
+				is_immediate1, s1 = handle_possible_immediate(operand1)
+				if is_immediate1:
+					result += "\tli	"+register_assignments[destination]+", "+str(s1)+"""
+"""
+					operand1 = destination
+	
+				is_immediate2, s2 = handle_possible_immediate(operand2)
+				if is_immediate2:
+					result += "\tli	"+register_assignments[destination]+", "+str(s2)+"""
+"""
+					operand2 = destination
+
+				result += "\tslt	"+register_assignments[destination]+", "+register_assignments[operand2]+", "+register_assignments[operand1]+"""
+"""
+				result += "\taddi	$t2, $0, 1"+"""
+"""
+				result += "\tsub	"+register_assignments[destination]+", $t2, "+register_assignments[destination]+"""
+"""
 			elif operation in ["+"]:
 				is_immediate, s = handle_possible_immediate(operand1)
 				if is_immediate:
-					result += "addi	"+register_assignments[destination]+", "+register_assignments[operand2]+", "+operand1+"""
+					result += "\taddi	"+register_assignments[destination]+", "+register_assignments[operand2]+", "+operand1+"""
 """
 				else:
 					is_immediate, s = handle_possible_immediate(operand2)
 					if is_immediate:
 						
-						result += "addi	"+register_assignments[destination]+", "+register_assignments[operand1]+", "+str(operand2)+"""
-	"""
+						result += "\taddi	"+register_assignments[destination]+", "+register_assignments[operand1]+", "+str(operand2)+"""
+"""
 					else:
-						result += "add	"+register_assignments[destination]+", "+register_assignments[operand1]+", 				"+register_assignments[operand2]+"""
-	"""
+						result += "\tadd	"+register_assignments[destination]+", "+register_assignments[operand1]+", 				"+register_assignments[operand2]+"""
+"""
+			elif operation in ["*"]:
+				is_immediate1, s1 = handle_possible_immediate(operand1)
+				if is_immediate1:
+					result += "\tli	"+register_assignments[destination]+", "+str(s1)+"""
+"""
+					operand1 = destination
+	
+				is_immediate2, s2 = handle_possible_immediate(operand2)
+				if is_immediate2:
+					result += "\tli	"+register_assignments[destination]+", "+str(s2)+"""
+"""
+					operand2 = destination
+
+				result += "\tmult\t"+register_assignments[operand1]+", "+register_assignments[operand2]+"""
+"""
+				result += "\tmflo\t"+register_assignments[destination]+"""
+"""
+			elif operation in ["conditional_branch"]:
+				result += "\tbne\t$0, "+register_assignments[operand1]+", "+destination+"""
+"""				
 			else:
 				asm, num_args = op_to_asm[operation]
 				labels = [key for key, value in funct_info.the_symbol_table.values[funct_info.name].items() if isinstance(value,mk3ac.Label)]
@@ -85,7 +135,7 @@ def process_3ac(the_3ac,funct_info):
 						return x
 					else:
 						return register_assignments[x]
-				result += asm+" "+", ".join([keep_if_label(item) for item in [destination,operand1,operand2][:num_args]])+"""
+				result += "\t"+asm+"\t"+", ".join([keep_if_label(item) for item in [destination,operand1,operand2][:num_args]])+"""
 """
 
 	return (result)
@@ -137,10 +187,12 @@ int main()
 	for(i = 1; i <=6; i++) {
 		result = 1;
 		for (j = 1; j <= i; j++) {
+			putint(result);
 			result = result * j;
 		};
 		putint(result);
 	};
+	exit();
 	return 0;
 }
 """
@@ -152,7 +204,7 @@ int main()
     functions = (dict(st.functions()))
     pprint.pprint(st.values.values)
     for key,value in functions.items():
-        if key == "putint":
+        if key in ["putint","exit"]:
             continue
         print key
         result = makeFunctionInformation(st,key)
@@ -160,8 +212,32 @@ int main()
         print result.size_of_locals
         pprint.pprint(result.offsets_of_locals)
         pprint.pprint(result.return_type)
-        print result.body
-        print process_3ac(result.body,result)
-        
-    
+        pprint.pprint(result.body)
+        asm = process_3ac(result.body,result)
+        asm = """
+.text
+main:
+"""+asm+"""
+puts:
+        li      $v0, 4                  # load appropriate system call code into register $v0;
+                                        # code for printing string is 4
+        syscall                         # call operating system to perform print operation
+        jr      $ra
 
+getint:
+        li      $v0, 5                  # load appropriate system call code into register $v0;
+                                        # code for reading integer is 5
+        syscall
+        jr      $ra
+
+putint:
+        li      $v0, 1                  # load appropriate system call code into register $v0;
+                                        # code for printing integer is 1
+        syscall
+        jr      $ra
+exit:
+        li      $v0, 10                 # system call code for exit = 10
+        syscall                         # call operating sys
+"""
+        with open("output.s","w") as f:
+            f.write(asm)
