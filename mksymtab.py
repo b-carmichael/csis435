@@ -255,6 +255,7 @@ class SymbolTable(object):
             offset = offset + the_size
     def functions(self):
         yield ("putint",{"...":[("int","arg"),],"return":"int"})
+        yield ("exit",{"...":[],"return":"int"})
     
         for key, value in self.values.values.items():
         	if isinstance(value,dict):
