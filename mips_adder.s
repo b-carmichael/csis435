@@ -15,13 +15,36 @@ main:
 	move	$s1, $v0
 	la	$a0, output_message3
 	jal puts
-	add	$a0, $s0, $s1
+	#add	$a0, $s0, $s1
+	move 	$a0, $s0
+	move	$a1, $s1
+	jal radd
+	move	$a0, $v0
 	jal putint
 	la	$a0, newline
 	jal puts
 	jal exit
 	
 	
+radd:
+					# recursive add
+					# $ra
+	addi	$sp, $sp, -4
+	sw	$ra, 0($sp)
+	
+	beq	$a0, $0, radd_done
+	addi	$a0, $a0, -1
+	addi	$a1, $a1, 1
+	jal	radd
+	j	radd_end
+radd_done:
+	move	$v0, $a1
+
+radd_end:
+	lw	$ra, 0($sp)
+	addi	$sp, $sp, 4
+	j	$ra
+
 puts:
 	li	$v0, 4			# load appropriate system call code into register $v0;
 					# code for printing string is 4
