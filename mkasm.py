@@ -5,25 +5,15 @@ import pycparser
 import mksymtab
 import mk3ac
 
-def assign_registers(the_3ac,funct_info):
-	names_of_locals = funct_info.offsets_of_locals.keys()
-	result = {}
-	counter = 0
-	for name in names_of_locals:
-		if name == "L5":
-			result[name] = "$t0"
-		else:
-			result[name] = "$s"+str(counter)
-			counter = counter + 1
-	#for label, operation, destination, operand1, operand2 in the_3ac:
-	return result
+import compiler_builtins
+import mkregassign
 
 op_to_asm = {
 	"unconditional_branch":	("j",1)
 	}
 
 def process_3ac(the_3ac,funct_info):
-	register_assignments = assign_registers(the_3ac,funct_info)
+	register_assignments = mkregassign.VariableAccess(funct_info)
 	def handle_possible_immediate(operand):
 		"return (immediate?,text)"
 		try:
@@ -32,7 +22,7 @@ def process_3ac(the_3ac,funct_info):
 			else:
 				assert(False)
 		except ValueError:
-			return (False,register_assignments[operand])
+			return (False,operand)
 		
 	result = ""
 	for label, operation, destination, operand1, operand2 in the_3ac:
@@ -47,12 +37,21 @@ def process_3ac(the_3ac,funct_info):
 		else:
 			if operation in ["call"]:
 				if operand2 != '':
-				    result += "\tmove\t$a0, "+register_assignments[operand2]+"""
+				    register, code = register_assignments.code_to_load_operand2(operand2)
+				    result += code
+				    result += "\tmove\t$a0, "+register+"""
 """
-				result += "\tjal\t"+str(operand1)+"""
+				#register, code = register_assignments.code_to_load_operand1(operand1)
+				#result += code
+				result += "\tjal\t"+operand1+"""
 """
-				result += "\tmove\t"+register_assignments[destination]+", $v0"+"""
-"""
+				code = register_assignments.code_to_write_destination(destination,"$v0")
+				result += code
+			elif operation in ["conditional_branch"]:
+				register, code = register_assignments.code_to_load_operand1(operand1)
+				result += code
+				result += "\tbne\t$0, "+register+", "+destination+"""
+"""				
 			elif operation in ["return"]:
 				is_immediate, s = handle_possible_immediate(destination)
 				if is_immediate:
@@ -60,8 +59,9 @@ def process_3ac(the_3ac,funct_info):
 """
 					destination = "$t1"
 				else:
-					result += "\tmove\t$t1, "+register_assignments[destination]+"""
-"""	
+					register, code = register_assignments.code_to_load_operand1(destination)
+					assert(register == "$t1")
+					result += code
 				result += """\tmove\t$v0, $t1
 """
 				result += """\tjr $ra
@@ -69,23 +69,33 @@ def process_3ac(the_3ac,funct_info):
 			elif operation in ["="]:
 				is_immediate, s = handle_possible_immediate(operand1)
 				if is_immediate:
-					result += "\tli	"+register_assignments[destination]+", "+str(operand1)+"""
+					result += "\tli	$t4, "+str(operand1)+"""
 """
+					code = register_assignments.code_to_write_destination(destination,"$t4")
+					result += code
 				else:
-					result += "\tmove	"+register_assignments[destination]+", "+register_assignments[operand1]+"""
-"""
+					register, code = register_assignments.code_to_load_operand1(operand1)
+					result += code
+					code = register_assignments.code_to_write_destination(destination,register)
+					result += code
 			elif operation in ["<="]:
+			elif operation in ["<=","+","*"]:
 				is_immediate1, s1 = handle_possible_immediate(operand1)
 				if is_immediate1:
-					result += "\tli	"+register_assignments[destination]+", "+str(s1)+"""
+					result += "\tli	$t1, "+str(s1)+"""
 """
-					operand1 = destination
-	
+				else:
+					register, code = register_assignments.code_to_load_operand1(operand1)
+					result += code
+					assert("$t1"==register)
+					# WORK FROM HERE
+					# rewrite to just have a "code_to_load" that takes a reg as an arg
 				is_immediate2, s2 = handle_possible_immediate(operand2)
 				if is_immediate2:
 					result += "\tli	"+register_assignments[destination]+", "+str(s2)+"""
 """
 					operand2 = destination
+				else:
 
 				result += "\tslt	"+register_assignments[destination]+", "+register_assignments[operand2]+", "+register_assignments[operand1]+"""
 """
@@ -124,9 +134,6 @@ def process_3ac(the_3ac,funct_info):
 """
 				result += "\tmflo\t"+register_assignments[destination]+"""
 """
-			elif operation in ["conditional_branch"]:
-				result += "\tbne\t$0, "+register_assignments[operand1]+", "+destination+"""
-"""				
 			else:
 				asm, num_args = op_to_asm[operation]
 				labels = [key for key, value in funct_info.the_symbol_table.values[funct_info.name].items() if isinstance(value,mk3ac.Label)]
@@ -204,7 +211,7 @@ int main()
     functions = (dict(st.functions()))
     pprint.pprint(st.values.values)
     for key,value in functions.items():
-        if key in ["putint","exit"]:
+        if key in compiler_builtins.function_names():
             continue
         print key
         result = makeFunctionInformation(st,key)
@@ -217,27 +224,6 @@ int main()
         asm = """
 .text
 main:
-"""+asm+"""
-puts:
-        li      $v0, 4                  # load appropriate system call code into register $v0;
-                                        # code for printing string is 4
-        syscall                         # call operating system to perform print operation
-        jr      $ra
-
-getint:
-        li      $v0, 5                  # load appropriate system call code into register $v0;
-                                        # code for reading integer is 5
-        syscall
-        jr      $ra
-
-putint:
-        li      $v0, 1                  # load appropriate system call code into register $v0;
-                                        # code for printing integer is 1
-        syscall
-        jr      $ra
-exit:
-        li      $v0, 10                 # system call code for exit = 10
-        syscall                         # call operating sys
-"""
+"""+asm+compiler_builtins.code()
         with open("output.s","w") as f:
             f.write(asm)
