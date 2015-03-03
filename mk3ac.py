@@ -6,6 +6,8 @@ import mksymtab
 
 from compiler_utilities import TagStack
 
+import compiler_builtins
+
 import itertools
 
 label_generator = itertools.count()
@@ -194,7 +196,7 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
 def make3ac(st):        
     functions = (dict(st.functions()))
     for key,value in functions.items():
-        if key in ["putint","exit"]:
+        if key in compiler_builtins.function_names():
             continue
         body = value["{}"]
         cb = CodeBuilder(key,st)
@@ -248,7 +250,7 @@ int sum_of_squares(int x) {
     functions = (dict(st.functions()))
     #pprint.pprint(st.values.path)
     for key,value in functions.items():
-        if key in ["putint","exit"]:
+        if key in compiler_builtins.function_names():
             continue
         print key
         body = value["{}"]
