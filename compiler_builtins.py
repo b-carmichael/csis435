@@ -2,6 +2,8 @@
 
 def functions():
         yield ("putint",{"...":[("int","arg"),],"return":"int"})
+        yield ("puts",{"...":[("int","arg"),],"return":"int"})
+        yield ("getint",{"...":[("int","arg"),],"return":"int"})
         yield ("exit",{"...":[],"return":"int"})
 
 def function_names():
