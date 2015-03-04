@@ -13,22 +13,18 @@
 class VariableAccess(object):
 	def __init__(self,funct_info):
 		self.offsets_of_locals = funct_info.offsets_of_locals
-	def code_to_load_operand1(self,operand1):
-		offset = self.offsets_of_locals[operand1]
-		return ("$t1","""
-	lw $t1 """+str(offset)+"""($sp)
-""")
-	def code_to_load_operand2(self,operand2):
-		offset = self.offsets_of_locals[operand2]
-		return ("$t2","""
-	lw $t2 """+str(offset)+"""($sp)
-""")
-	def code_to_write_destination(self,destination,which_register):
+	def code_to_load(self,operand,register):
+		offset = self.offsets_of_locals[operand]
+		return """lw """+register+", "+str(offset)+"""($sp)		# """+str(operand)
+	def code_to_store(self,destination,which_register):
 		offset = self.offsets_of_locals[destination]
-		return """
-	sw """+which_register+", "+str(offset)+"""($sp)
-"""
-	
+		return """sw """+which_register+", "+str(offset)+"""($sp)		# """+str(destination)
+	def register_for(self,arg):
+		if arg == "generic_load":
+			return "$t5"
+		else:
+			assert(False)
+			
 def assign_registers(the_3ac,funct_info):
         names_of_locals = funct_info.offsets_of_locals.keys()
         result = {}
