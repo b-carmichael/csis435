@@ -8,13 +8,14 @@ import mk3ac
 import compiler_builtins
 import mkregassign
 
-op_to_asm = {
-	"unconditional_branch":	("j",1)
-	}
-
-def process_3ac(the_3ac,funct_info):
-	register_assignments = mkregassign.VariableAccess(funct_info)
-	def handle_possible_immediate(operand):
+class AssemblyGenerator(object):
+	def __init__(self,funct_info):
+		self.funct_info = funct_info
+		self.labels = [key for key, value in funct_info.the_symbol_table.values[funct_info.name].items() if isinstance(value,mk3ac.Label)]
+		self.current_asm = []
+		self.writeback_asm = []
+		self.register_assignments = mkregassign.VariableAccess(funct_info)
+	def handle_possible_immediate(self,operand):
 		"return (immediate?,text)"
 		try:
 			if str(int(operand)) == str(operand):
@@ -23,129 +24,121 @@ def process_3ac(the_3ac,funct_info):
 				assert(False)
 		except ValueError:
 			return (False,operand)
-		
-	result = ""
-	for label, operation, destination, operand1, operand2 in the_3ac:
-		if label is None:
+	def handle_operand(self,operand,register,mode):
+		try:
+			if operand[0] == "$":
+				# this is already a register
+				assert(mode == "read")
+				self.current_asm.append("	move	"+str(register)+", "+str(operand))				
+				return register
+		except:
 			pass
+		x = operand
+		if (x in self.labels):
+			return x
 		else:
-			result += "\n"
+			is_immediate, s = self.handle_possible_immediate(x)
+			if is_immediate:
+				self.current_asm.append("	li	"+str(register)+", "+str(s))
+				return register
+			else:
+				try:
+					if mode == "read":
+						self.current_asm.append("	"+self.register_assignments.code_to_load(x,register))
+					elif mode == "write":
+						self.writeback_asm.append("	"+self.register_assignments.code_to_store(x,register))
+					else:
+						assert(False)
+				except KeyError:
+					return x
+				return register
+	def clear_writeback(self):
+		self.current_asm.extend(self.writeback_asm)
+		self.writeback_asm = []
+	
+	def make_asm_text(self,operation,args,comments=None,label=None):
+		result = ""
+		if label is None:
+			result += "	"
+		else:
 			result += str(label)
-			result += ":"
+			result += ":	"
 		if operation == "":
 			pass
 		else:
-			if operation in ["call"]:
+			result += operation
+			result += " "
+			def mode_if(x):
+				if x == 0:
+					return "write"
+				else:
+					return "read"
+			result += ", ".join([self.handle_operand(item,"$t"+str(index),mode_if(index)) for index, item in enumerate(args)])
+		if comments is None:
+			pass
+		else:
+			result += "		#"+str(comments)
+		self.current_asm.append(result)
+		self.clear_writeback()
+
+op_to_asm = {
+	"unconditional_branch":	("j",lambda x:x),
+	"conditional_branch": ("bne",lambda x:("$0",x[1],x[0])),
+	"=":("move",lambda x:x),
+	"+":("add",lambda x:x)
+	}
+
+def arg_filter(x):
+	if x is "":
+		return False
+	elif x is None:
+		return False
+	else:
+		return x
+
+def process_3ac(the_3ac,funct_info):
+	ag = AssemblyGenerator(funct_info)	
+	# right at the start of the function, we need to adjust $sp appropriately
+	# comments=str(operation)+" "+str(destination)+", "+str(operand1)+", "+str(operand2)
+	ag.make_asm_text("add",["$sp","$sp",-1*funct_info.size_of_locals])
+	for label, operation, destination, operand1, operand2 in the_3ac:
+		if operation in op_to_asm:
+			asm_op, permutation = op_to_asm[operation]
+			ag.make_asm_text(asm_op,
+				permutation(filter(arg_filter,[destination,operand1,operand2])),
+				label=label,
+				comments=str(operation)+" "+str(destination)+", "+str(operand1)+", "+str(operand2)
+			)
+		else:
+			if operation == "":
+				ag.make_asm_text("",[],label=label)
+			elif operation in ["call"]:
 				if operand2 != '':
-				    register, code = register_assignments.code_to_load_operand2(operand2)
-				    result += code
-				    result += "\tmove\t$a0, "+register+"""
-"""
-				#register, code = register_assignments.code_to_load_operand1(operand1)
-				#result += code
-				result += "\tjal\t"+operand1+"""
-"""
-				code = register_assignments.code_to_write_destination(destination,"$v0")
-				result += code
-			elif operation in ["conditional_branch"]:
-				register, code = register_assignments.code_to_load_operand1(operand1)
-				result += code
-				result += "\tbne\t$0, "+register+", "+destination+"""
-"""				
+				    ag.handle_operand(operand2,"$a0","read")
+				ag.make_asm_text("jal",[operand1],label=label)
+				ag.handle_operand(destination,"$v0","write")
+				ag.clear_writeback()
 			elif operation in ["return"]:
-				is_immediate, s = handle_possible_immediate(destination)
-				if is_immediate:
-					result += "\tli\t$t1, "+s+"""
-"""
-					destination = "$t1"
-				else:
-					register, code = register_assignments.code_to_load_operand1(destination)
-					assert(register == "$t1")
-					result += code
-				result += """\tmove\t$v0, $t1
-"""
-				result += """\tjr $ra
-"""			
-			elif operation in ["="]:
-				is_immediate, s = handle_possible_immediate(operand1)
-				if is_immediate:
-					result += "\tli	$t4, "+str(operand1)+"""
-"""
-					code = register_assignments.code_to_write_destination(destination,"$t4")
-					result += code
-				else:
-					register, code = register_assignments.code_to_load_operand1(operand1)
-					result += code
-					code = register_assignments.code_to_write_destination(destination,register)
-					result += code
+				ag.handle_operand(destination,"$v0","read")
+				ag.make_asm_text("jr",["$ra"],label=label)
 			elif operation in ["<="]:
-			elif operation in ["<=","+","*"]:
-				is_immediate1, s1 = handle_possible_immediate(operand1)
-				if is_immediate1:
-					result += "\tli	$t1, "+str(s1)+"""
-"""
-				else:
-					register, code = register_assignments.code_to_load_operand1(operand1)
-					result += code
-					assert("$t1"==register)
-					# WORK FROM HERE
-					# rewrite to just have a "code_to_load" that takes a reg as an arg
-				is_immediate2, s2 = handle_possible_immediate(operand2)
-				if is_immediate2:
-					result += "\tli	"+register_assignments[destination]+", "+str(s2)+"""
-"""
-					operand2 = destination
-				else:
-
-				result += "\tslt	"+register_assignments[destination]+", "+register_assignments[operand2]+", "+register_assignments[operand1]+"""
-"""
-				result += "\taddi	$t2, $0, 1"+"""
-"""
-				result += "\tsub	"+register_assignments[destination]+", $t2, "+register_assignments[destination]+"""
-"""
-			elif operation in ["+"]:
-				is_immediate, s = handle_possible_immediate(operand1)
-				if is_immediate:
-					result += "\taddi	"+register_assignments[destination]+", "+register_assignments[operand2]+", "+operand1+"""
-"""
-				else:
-					is_immediate, s = handle_possible_immediate(operand2)
-					if is_immediate:
-						
-						result += "\taddi	"+register_assignments[destination]+", "+register_assignments[operand1]+", "+str(operand2)+"""
-"""
-					else:
-						result += "\tadd	"+register_assignments[destination]+", "+register_assignments[operand1]+", 				"+register_assignments[operand2]+"""
-"""
+				ag.make_asm_text("slt",[
+					destination,
+					operand1,
+					operand2
+					],label=label,comments="slt "+str(destination)+", "+str(operand1)+", "+str(operand2))
+				ag.make_asm_text("add",["$t3","$0",1],comments="put 1 into $t3")
+				ag.make_asm_text("sub",[destination,"$t3",destination],comments="subtract destination of the slt from 1 to negate")
 			elif operation in ["*"]:
-				is_immediate1, s1 = handle_possible_immediate(operand1)
-				if is_immediate1:
-					result += "\tli	"+register_assignments[destination]+", "+str(s1)+"""
-"""
-					operand1 = destination
-	
-				is_immediate2, s2 = handle_possible_immediate(operand2)
-				if is_immediate2:
-					result += "\tli	"+register_assignments[destination]+", "+str(s2)+"""
-"""
-					operand2 = destination
-
-				result += "\tmult\t"+register_assignments[operand1]+", "+register_assignments[operand2]+"""
-"""
-				result += "\tmflo\t"+register_assignments[destination]+"""
-"""
+				ag.make_asm_text("mult",[
+					ag.handle_operand(operand1,"$t0","read"),
+					ag.handle_operand(operand2,"$t1","read")
+					],label=label,comments=str(operation)+" "+str(destination)+", "+str(operand1)+", "+str(operand2))
+				ag.make_asm_text("mflo",[destination])
 			else:
-				asm, num_args = op_to_asm[operation]
-				labels = [key for key, value in funct_info.the_symbol_table.values[funct_info.name].items() if isinstance(value,mk3ac.Label)]
-				def keep_if_label(x):
-					if (x in labels):
-						return x
-					else:
-						return register_assignments[x]
-				result += "\t"+asm+"\t"+", ".join([keep_if_label(item) for item in [destination,operand1,operand2][:num_args]])+"""
-"""
-
-	return (result)
+				pprint.pprint(operation)
+				assert(False)
+	return ("\n".join(ag.current_asm))
 
 # WORK HERE
 class FunctionInformation(object):
@@ -192,6 +185,7 @@ int main()
 	int j;
 	int result;
 	for(i = 1; i <=6; i++) {
+		getint();
 		result = 1;
 		for (j = 1; j <= i; j++) {
 			putint(result);
@@ -201,6 +195,30 @@ int main()
 	};
 	exit();
 	return 0;
+}
+"""
+	if False:
+	    code_to_parse = """
+int main()
+{
+	int i;
+	int j;
+	int result;
+	int zero;
+	zero = 0;
+	j = 9;
+	result = 1;
+	for (i = 1; i <= j; i++) {
+		putint(i);
+		putint(zero);
+		putint(zero);
+		putint(result);
+		putint(zero);
+		putint(zero);
+		putint(zero);
+		result = result * j;
+	};
+	exit();
 }
 """
     cparser = pycparser.c_parser.CParser()
