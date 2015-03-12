@@ -1,3 +1,6 @@
+# just for this project
+output.s
+
 *.py[cod]
 
 # C extensions

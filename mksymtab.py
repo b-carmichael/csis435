@@ -4,6 +4,8 @@ import pprint # so we can pretty-print our output
 
 from compiler_utilities import TagStack
 
+import compiler_builtins
+
 class NestedDict(object):
     def __init__(self):
         self.values = {}
@@ -202,6 +204,12 @@ class SymbolTable(object):
             return args_dict[of_what]
         else:
             assert(isinstance(of_what,str))
+            try:
+                i = int(of_what)
+                if of_what == str(i):
+                    return "int"
+            except e:
+                pass
             return Identifier(of_what)
     def sizeof(self,of_what):
         if of_what == "int":
@@ -248,6 +256,9 @@ class SymbolTable(object):
             yield (item_name,(offset,item_type))
             offset = offset + the_size
     def functions(self):
+        for item in compiler_builtins.functions():
+            yield item
+    
         for key, value in self.values.values.items():
         	if isinstance(value,dict):
         		yield (key,value)

@@ -24,6 +24,6 @@ class TagStack(object):
                 actual_self.tags[the_tag] += 1
         return ContextManager()
     def __contains__(self,the_tag):
-        return self.tags[the_tag] > 1
+        return self.tags[the_tag] >= 1
         
 

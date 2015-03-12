@@ -6,6 +6,8 @@ import mksymtab
 
 from compiler_utilities import TagStack
 
+import compiler_builtins
+
 import itertools
 
 label_generator = itertools.count()
@@ -54,6 +56,17 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
     def visit_Return(self,node):
         self.generic_visit(node)
         self.add("return",self.expression_stack.pop(),"","")
+    def visit_FuncCall(self,node):
+        self.generic_visit(node)
+        # WORK HERE MORE LATER
+        function_name = node.name.name
+        function_return_type = dict(self.the_symbol_table.functions())[function_name]["return"]
+        destination = self.genLabel(function_return_type,"local")
+        if node.args is None:
+            self.add("call",destination,node.name.name,"")
+        else:
+            self.add("call",destination,node.name.name,node.args.children()[0][1].name)
+        self.expression_stack.append(destination)
     def visit_BinaryOp(self,node):
         self.generic_visit(node)
         operand1 = self.expression_stack.pop()
@@ -98,6 +111,8 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
     def visit_StructRef(self,node):
         StructRef_type = node.type
         self.visit(dict(node.children())["name"])
+        # we can't really deref a struct,
+        # we want to defer the deref if we're in an lvalue context
         if StructRef_type == "->":
             operand1 = self.expression_stack.pop()
             the_type = self.the_symbol_table.typeof(operand1)
@@ -105,16 +120,23 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
             dim, ptr_type = the_type
             the_type = ptr_type
             destination = self.genLabel(the_type,"local")
-            self.add("*",destination,operand1,"")    
-            self.expression_stack.append(destination)
+            if "lvalue" in self.state:
+                self.expression_stack.append(operand1)
+            else:
+                self.add("*",destination,operand1,"")    
+                self.expression_stack.append(destination)
         if StructRef_type in [".","->"]:
             the_struct = self.expression_stack.pop()
             self.visit(dict(node.children())["field"])
             the_field = self.expression_stack.pop()
+            assert(the_field in ["next","item"])
             the_struct_type = self.the_symbol_table.typeof(the_struct)
+            if isinstance(the_struct_type,tuple):
+            	dim, the_struct_type = the_struct_type
+            if the_field == "item":
+                #pprint.pprint(the_struct_type)
+                pass
             offset, the_element_type = dict(self.the_symbol_table.offsets_and_types_of_elements(the_struct_type))[the_field]
-            pprint.pprint(offset)
-            pprint.pprint(the_element_type)
             destination = self.genLabel(the_element_type,"local")
             if "lvalue" in self.state:
                 self.add("+",destination,the_struct,offset)
@@ -129,11 +151,14 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
         self.visit(init)
         junk = self.expression_stack.pop()        
         top_of_loop = self.genLabel(Label(),"local")
+        middle_of_loop = self.genLabel(Label(),"local")
         bottom_of_loop = self.genLabel(Label(),"local")
         self.add("","","","",label=top_of_loop)
         self.visit(cond)
         conditional = self.expression_stack.pop()
-        self.add("conditional_branch",bottom_of_loop,conditional,"")
+        self.add("conditional_branch",middle_of_loop,conditional,"")
+        self.add("unconditional_branch",bottom_of_loop,"","")
+        self.add("","","","",label=middle_of_loop)
         self.visit(stmt)
         junk = self.expression_stack.pop()        
         self.visit(next)
@@ -143,11 +168,14 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
     def visit_While(self,node):
         cond, stmt = node.cond, node.stmt        
         top_of_loop = self.genLabel(Label(),"local")
+        middle_of_loop = self.genLabel(Label(),"local")
         bottom_of_loop = self.genLabel(Label(),"local")
         self.add("","","","",label=top_of_loop)
         self.visit(cond)
         conditional = self.expression_stack.pop()
-        self.add("conditional_branch",bottom_of_loop,conditional,"")
+        self.add("conditional_branch",middle_of_loop,conditional,"")
+        self.add("unconditional_branch",bottom_of_loop,"","")
+        self.add("","","","",label=middle_of_loop)
         self.visit(stmt)
         junk = self.expression_stack.pop()        
         self.add("unconditional_branch",top_of_loop,"","")
@@ -171,8 +199,15 @@ class CodeBuilder(pycparser.c_ast.NodeVisitor):
             junk = self.expression_stack.pop()        
         self.add("","","","",label=end_part)
     
-        
-        
+def make3ac(st):        
+    functions = (dict(st.functions()))
+    for key,value in functions.items():
+        if key in compiler_builtins.function_names():
+            continue
+        body = value["{}"]
+        cb = CodeBuilder(key,st)
+        cb.start_visit(body)
+        value["{}"] = cb.the_code        
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:    # optionally support passing in some code as a command-line argument
@@ -221,6 +256,8 @@ int sum_of_squares(int x) {
     functions = (dict(st.functions()))
     #pprint.pprint(st.values.path)
     for key,value in functions.items():
+        if key in compiler_builtins.function_names():
+            continue
         print key
         body = value["{}"]
         body.show()
